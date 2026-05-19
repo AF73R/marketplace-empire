@@ -1,55 +1,76 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
-// UploadHandler handles image uploads.
-// Files are stored in the "public/uploads" directory and served via /uploads/ prefix.
 type UploadHandler struct {
-	UploadDir string // e.g., "./public/uploads"
-	BaseURL   string // e.g., "http://localhost:8080/uploads"
+	client     *s3.Client
+	bucket     string
+	publicURL  string
+	maxSize    int64 // 5 MB
 }
 
-// NewUploadHandler creates an UploadHandler using environment variables.
-// Required: UPLOAD_DIR (default: ./public/uploads) , APP_BASE_URL (for constructing full URLs)
 func NewUploadHandler() (*UploadHandler, error) {
-	dir := os.Getenv("UPLOAD_DIR")
-	if dir == "" {
-		dir = "./public/uploads"
+	accountID := os.Getenv("CLOUDFLARE_ACCOUNT_ID")
+	accessKey := os.Getenv("R2_ACCESS_KEY_ID")
+	secretKey := os.Getenv("R2_SECRET_ACCESS_KEY")
+	bucket := os.Getenv("R2_BUCKET")
+	publicURL := os.Getenv("R2_PUBLIC_URL") // e.g., https://pub-xxx.r2.dev or custom domain
+
+	if accountID == "" || accessKey == "" || secretKey == "" || bucket == "" || publicURL == "" {
+		return nil, fmt.Errorf("missing Cloudflare R2 environment variables (CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_URL)")
 	}
-	// Ensure the directory exists
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create upload dir: %w", err)
+
+	endpoint := fmt.Sprintf("https://%s.r2.cloudflarestorage.com", accountID)
+
+	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
+		return aws.Endpoint{URL: endpoint}, nil
+	})
+
+	cfg, err := config.LoadDefaultConfig(context.Background(),
+		config.WithEndpointResolverWithOptions(customResolver),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+		config.WithRegion("auto"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AWS config: %w", err)
 	}
-	base := os.Getenv("APP_BASE_URL")
-	if base == "" {
-		base = "http://localhost:8080"
-	}
-	return &UploadHandler{UploadDir: dir, BaseURL: strings.TrimRight(base, "/") + "/uploads"}, nil
+
+	client := s3.NewFromConfig(cfg)
+
+	return &UploadHandler{
+		client:    client,
+		bucket:    bucket,
+		publicURL: strings.TrimRight(publicURL, "/"),
+		maxSize:   5 << 20,
+	}, nil
 }
 
-// RegisterRoutes mounts the upload endpoint.
 func (h *UploadHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/", h.UploadFile)
 }
 
-// UploadFile accepts a multipart file upload and returns the public URL.
 func (h *UploadHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
-	// Limit size to 5 MB
-	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
-
-	if err := r.ParseMultipartForm(5 << 20); err != nil {
-		http.Error(w, `{"error":"file too large or invalid form"}`, http.StatusBadRequest)
+	r.Body = http.MaxBytesReader(w, r.Body, h.maxSize)
+	if err := r.ParseMultipartForm(h.maxSize); err != nil {
+		http.Error(w, `{"error":"file too large or invalid multipart"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -60,7 +81,6 @@ func (h *UploadHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Validate file type
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	allowed := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true}
 	if !allowed[ext] {
@@ -68,24 +88,25 @@ func (h *UploadHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate unique filename
 	filename := fmt.Sprintf("%s%s", uuid.New().String(), ext)
-	dstPath := filepath.Join(h.UploadDir, filename)
 
-	dst, err := os.Create(dstPath)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	_, err = h.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(h.bucket),
+		Key:         aws.String(filename),
+		Body:        file,
+		ContentType: aws.String("image/" + strings.TrimPrefix(ext, ".")),
+		ACL:         "public-read",
+	})
 	if err != nil {
-		http.Error(w, `{"error":"failed to save file"}`, http.StatusInternalServerError)
-		return
-	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, file); err != nil {
-		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
+		log.Printf("S3 upload error: %v", err)
+		http.Error(w, `{"error":"failed to upload image"}`, http.StatusInternalServerError)
 		return
 	}
 
-	// Return the public URL
-	imageURL := fmt.Sprintf("%s/%s", h.BaseURL, filename)
+	imageURL := fmt.Sprintf("%s/%s", h.publicURL, filename)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"url": imageURL})

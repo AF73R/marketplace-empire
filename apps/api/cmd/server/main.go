@@ -40,17 +40,27 @@ func main() {
 
 	// Redis (optional)
 	var rdb *redis.Client
-	redisAddr := os.Getenv("REDIS_URL")
-	if redisAddr == "" || redisAddr == "redis://localhost:6379" {
-		redisAddr = "localhost:6379"
-	}
-	rdb = redis.NewClient(&redis.Options{Addr: redisAddr})
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Printf("Warning: Redis not available (%v)", err)
-		rdb = nil
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+    	log.Println("REDIS_URL not set – running without Redis")
 	} else {
-		log.Println("Connected to Redis")
-		defer rdb.Close()
+    	// fix common mis‑configurations
+    	if !strings.HasPrefix(redisURL, "redis") {
+        	redisURL = "redis://" + redisURL
+    	}
+    	opts, err := redis.ParseURL(redisURL)
+    	if err != nil {
+        	log.Printf("Warning: could not parse REDIS_URL: %v – Redis disabled", err)
+    	} else {
+        	rdb = redis.NewClient(opts)
+        	if err := rdb.Ping(ctx).Err(); err != nil {
+            	log.Printf("Warning: Redis not available (%v)", err)
+            	rdb = nil
+        	} else {
+            	log.Println("Connected to Redis")
+            	defer rdb.Close()
+        	}
+    	}
 	}
 
 	// Migrations

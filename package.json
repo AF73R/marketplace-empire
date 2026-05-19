@@ -1,0 +1,21 @@
+{
+  "name": "marketplace-empire",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n web,api -c blue,green \"pnpm --filter @marketplace/web dev\" \"cd apps/api && go run ./cmd/server\"",
+    "dev:web": "pnpm --filter @marketplace/web dev",
+    "dev:api": "cd apps/api && go run ./cmd/server",
+    "build": "pnpm --filter @marketplace/web build",
+    "start": "pnpm --filter @marketplace/web start",
+    "lint": "pnpm --filter @marketplace/web lint"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "prettier": "^3.2.5",
+    "turbo": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@9.1.2"
+}

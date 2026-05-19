@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  # ─── PostgreSQL ──────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: marketplace-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: market
+      POSTGRES_PASSWORD: marketplace
+      POSTGRES_DB: marketplace
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U market -d marketplace"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis ──────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: marketplace-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Meilisearch ────────────────────────────────────────────────
+  meilisearch:
+    image: getmeili/meilisearch:v1.6
+    container_name: marketplace-meilisearch
+    restart: unless-stopped
+    ports:
+      - "7700:7700"
+    environment:
+      MEILI_MASTER_KEY: "a-safe-master-key"
+    volumes:
+      - meilisearch_data:/meili_data
+
+  # ─── Ollama (local AI for chatbot) ──────────────────────────────
+  #ollama:
+    #image: ollama/ollama:latest
+    #container_name: marketplace-ollama
+    #restart: unless-stopped
+    #ports:
+      #- "11434:11434"
+    #volumes:
+      #- ollama_data:/root/.ollama
+    # Uncomment the line below to pre-load a model on startup (first time takes a while)
+    # command: "ollama pull llama3.2:3b && ollama serve"
+
+volumes:
+  postgres_data:
+  meilisearch_data:
+  ollama_data:

@@ -1,0 +1,26 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "globalEnv": ["DATABASE_URL", "NEXT_PUBLIC_API_URL", "STRIPE_SECRET_KEY", "REDIS_URL", "JWT_SECRET"],
+    "tasks": {
+      "build": {
+        "dependsOn": ["^build"],
+        "outputs": ["dist/**", ".next/**", "build/**"]
+      },
+      "dev": {
+        "dependsOn": ["^build"],
+        "cache": false,
+        "persistent": true
+      },
+      "start": {
+        "dependsOn": ["build"],
+        "cache": false
+      },
+      "lint": {
+        "outputs": []
+      },
+      "test": {
+        "dependsOn": ["build"],
+        "outputs": []
+      }
+    }
+  }

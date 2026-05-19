@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/auth-context";
@@ -11,17 +11,17 @@ import { ArrowLeft, Search } from "lucide-react";
 interface SellerOrder {
   id: string;
   buyer_name: string;
-  total_amount: number;  // full order total (not used for display)
-  subtotal: number;      // seller's items sum – we show this
+  total_amount: number;
+  subtotal: number;
   status: string;
   item_count: number;
   placed_at: string;
 }
 
-export default function SellerOrdersPage() {
+function SellerOrdersContent() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
-  const statusFilter = searchParams.get("status") || ""; // e.g., "delivered"
+  const statusFilter = searchParams.get("status") || "";
 
   const [orders, setOrders] = useState<SellerOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,7 +34,6 @@ export default function SellerOrdersPage() {
     apiClient
       .get<SellerOrder[]>("/seller-orders")
       .then((data) => {
-        // Filter client‑side by status if requested
         const filtered = statusFilter
           ? data.filter((o) => o.status === statusFilter)
           : data;
@@ -125,5 +124,13 @@ export default function SellerOrdersPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function SellerOrdersPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-20">Loading...</div>}>
+      <SellerOrdersContent />
+    </Suspense>
   );
 }

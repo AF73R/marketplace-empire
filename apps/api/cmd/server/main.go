@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,6 +40,12 @@ func main() {
 	poolConfig.ConnConfig.StatementCacheCapacity = 0
 	// Optional: increase max connections if needed
 	poolConfig.MaxConns = 10
+
+	poolConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+    	// Discard all prepared statements on every new connection
+    	_, err := conn.Exec(ctx, "DISCARD ALL")
+    	return err
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {

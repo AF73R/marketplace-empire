@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -23,7 +22,6 @@ import (
 	"github.com/marketplace-empire/api/internal/payment"
 	"github.com/marketplace-empire/api/internal/search"
 	"github.com/marketplace-empire/api/internal/shipping"
-	"github.com/marketplace-empire/api/internal/static"
 	"github.com/marketplace-empire/api/internal/tax"
 	"github.com/marketplace-empire/api/internal/ws"
 )

@@ -30,21 +30,29 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+	// --- Database connection with statement cache disabled ---
+	poolConfig, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))
+	if err != nil {
+		log.Fatalf("Unable to parse DATABASE_URL: %v", err)
+	}
+	// Disable statement caching to avoid "prepared statement already exists" errors
+	poolConfig.ConnConfig.StatementCacheCapacity = 0
+	// Optional: increase max connections if needed
+	poolConfig.MaxConns = 10
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v", err)
 	}
 	defer pool.Close()
 	log.Println("Connected to PostgreSQL")
 
-	// ─── Redis (Upstash) – use ParseURL to handle rediss:// ─────────
+	// --- Redis (Upstash) – use ParseURL to handle rediss:// ---
 	var rdb *redis.Client
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
 		log.Println("REDIS_URL not set – running without Redis")
 	} else {
-		// Upstash gives a URL like rediss://default:password@host:port
-		// redis.ParseURL understands that format.
 		opts, err := redis.ParseURL(redisURL)
 		if err != nil {
 			log.Printf("Warning: could not parse REDIS_URL (%v) – Redis disabled", err)
@@ -60,7 +68,7 @@ func main() {
 		}
 	}
 
-	// ─── Auto‑migrations ──────────────────────────────────────────
+	// --- Auto‑migrations ---
 	auth.EnsureAdminColumn(pool)
 	auth.EnsureVerificationColumns(pool)
 	pool.Exec(ctx, `DO $$ BEGIN
@@ -99,7 +107,7 @@ func main() {
 		UPDATE settings SET shipping_free_threshold = 99999999 WHERE id = 1;
 	`)
 
-	// ─── Core services ────────────────────────────────────────────
+	// --- Core services ---
 	ledger := inventory.NewLedger(pool)
 	if rdb != nil {
 		_ = inventory.NewReservationManager(rdb, ledger, 15*time.Minute)
@@ -115,7 +123,7 @@ func main() {
 
 	hub := ws.NewHub()
 
-	// ─── Handlers ─────────────────────────────────────────────────
+	// --- Handlers ---
 	authHandler := &handler.AuthHandler{DB: pool}
 	productHandler := &handler.ProductHandler{DB: pool}
 	orderHandler := &handler.OrderHandler{
@@ -159,7 +167,7 @@ func main() {
 		}()
 	}
 
-	// ─── Router ──────────────────────────────────────────────────
+	// --- Router ---
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -175,8 +183,6 @@ func main() {
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("OK")) })
 	r.Get("/ws", hub.WSHandler)
-	// Remove local upload serving if using Cloudflare R2
-	// r.Handle("/uploads/*", static.ServeUploads("./public/uploads"))
 
 	r.Route("/api", func(r chi.Router) {
 		// Public
@@ -244,7 +250,7 @@ func main() {
 	log.Println("Server stopped")
 }
 
-// ─── Route registration helpers ────────────────────────────────────────
+// --- Route registration helpers (same as before) ---
 func registerAuthRoutes(a *handler.AuthHandler, pool *pgxpool.Pool) http.Handler {
 	r := chi.NewRouter()
 	a.RegisterRoutes(r)
